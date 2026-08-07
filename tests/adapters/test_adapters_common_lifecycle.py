@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from nemo_fabric_adapters.common import lifecycle
 from nemo_fabric_adapter_contract.models import AgentConfig
+from pydantic import BaseModel, field_validator
 
 
 def _request(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -148,11 +149,11 @@ def test_lifecycle_host_validates_opt_in_typed_config_before_adapter_start():
             _request("stop", {"runtime_id": runtime_id}),
         ]
     )
-    starts: list[AgentConfig] = []
+    starts: list[tuple[dict[str, Any], AgentConfig]] = []
 
     class Runtime:
         async def start(self, payload) -> None:
-            starts.append(payload["config"])
+            starts.append((payload["config"], payload["agent_config"]))
 
         async def invoke(self, _payload):
             raise AssertionError("invoke is not expected")
@@ -168,17 +169,26 @@ def test_lifecycle_host_validates_opt_in_typed_config_before_adapter_start():
     )
 
     assert len(starts) == 1
-    assert isinstance(starts[0], AgentConfig)
-    assert starts[0].harness.settings == {"profile": "typed"}
+    assert starts[0][0] == {"harness": {"settings": {"profile": "typed"}}}
+    assert isinstance(starts[0][1], AgentConfig)
+    assert starts[0][1].harness.settings == {"profile": "typed"}
 
 
-def test_lifecycle_host_rejects_invalid_opt_in_config_before_runtime_creation():
+def test_lifecycle_host_reports_invalid_opt_in_config_before_runtime_creation(capsys):
+    class SecretConfig(BaseModel):
+        token: str
+
+        @field_validator("token")
+        @classmethod
+        def reject_token(cls, value: str) -> str:
+            raise ValueError(f"rejected token {value}")
+
     input_stream, output_stream = _streams(
         [
             _request(
                 "start",
                 {
-                    "config": {"unknown": True},
+                    "config": {"token": "super-secret-value"},
                     "runtime_context": {"runtime_id": "runtime-1"},
                 },
             )
@@ -202,13 +212,19 @@ def test_lifecycle_host_rejects_invalid_opt_in_config_before_runtime_creation():
 
     lifecycle.serve(
         Runtime,
-        config_model=AgentConfig,
+        config_model=SecretConfig,
         input_stream=input_stream,
         output_stream=output_stream,
     )
 
     response = json.loads(output_stream.getvalue())
     assert response["outcome"]["error"]["code"] == "lifecycle_invalid_config"
+    metadata = response["outcome"]["error"]["metadata"]
+    assert metadata == {"error_type": "ValidationError"}
+    assert "super-secret-value" not in json.dumps(metadata)
+    stderr = capsys.readouterr().err
+    assert "Adapter config validation failed (ValidationError)" in stderr
+    assert "super-secret-value" not in stderr
     assert created == 0
 
 

@@ -232,11 +232,18 @@ async def _handle_start(
         try:
             config = config_model.model_validate(payload.get("config"))
         except Exception as error:
+            print(
+                f"Adapter config validation failed ({type(error).__name__}); "
+                "see lifecycle response metadata for the error type.",
+                file=sys.stderr,
+            )
+            metadata: dict[str, Any] = {"error_type": type(error).__name__}
             raise LifecycleError(
                 "lifecycle_invalid_config",
                 "Adapter config does not match its typed contract",
+                metadata=metadata,
             ) from error
-        payload = {**payload, "config": config}
+        payload = {**payload, "agent_config": config}
 
     candidate = runtime_factory()
     try:
@@ -397,8 +404,9 @@ def serve(
     """Serve ordered lifecycle requests for exactly one Fabric runtime.
 
     ``config_model`` opts an adapter into typed southbound configuration. The
-    host validates the start payload and passes the resulting model instance as
-    ``payload["config"]``. Omitting it preserves the legacy mapping unchanged.
+    host keeps the wire mapping in ``payload["config"]`` and passes the
+    validated model instance in ``payload["agent_config"]``. Omitting it
+    preserves the legacy payload unchanged.
     """
 
     # Reserve process stdout for the protocol for the entire host lifetime,

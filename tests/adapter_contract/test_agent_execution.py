@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from nemo_fabric_adapter_contract.models import AgentArtifact
+from nemo_fabric_adapter_contract.models import ArtifactRef
 from nemo_fabric_adapter_contract.models import AgentRunError
 from nemo_fabric_adapter_contract.models import AgentRunRequest
 from nemo_fabric_adapter_contract.models import AgentRunResult
@@ -127,3 +128,25 @@ def test_failed_agent_run_result_requires_error():
 def test_agent_artifact_rejects_unsafe_paths(path: str):
     with pytest.raises(ValidationError, match="artifact path must be"):
         AgentArtifact(name="output", kind="file", path=path)
+
+
+def test_agent_artifact_accepts_non_ascii_relative_drive_prefix():
+    artifact = AgentArtifact(name="output", kind="file", path="é:output")
+
+    assert artifact.path == "é:output"
+
+
+def test_runtime_context_artifact_ref_accepts_metadata():
+    artifact = ArtifactRef(
+        name="trace",
+        kind="file",
+        path="trace.jsonl",
+        metadata={"rows": 10},
+    )
+
+    assert artifact.model_dump(mode="json") == {
+        "name": "trace",
+        "kind": "file",
+        "path": "trace.jsonl",
+        "metadata": {"rows": 10},
+    }

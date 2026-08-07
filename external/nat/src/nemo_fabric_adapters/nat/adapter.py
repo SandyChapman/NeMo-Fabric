@@ -74,7 +74,7 @@ def _runtime_id(payload: dict[str, Any]) -> str:
 
 
 def _agent_config(payload: dict[str, Any]) -> AgentConfig:
-    config = payload.get("config")
+    config = payload.get("agent_config", payload.get("config"))
     if not isinstance(config, AgentConfig):
         raise _config_error(
             "nat_invalid_agent_config",
